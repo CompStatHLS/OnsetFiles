@@ -1,0 +1,137 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+___
+title: "OnsetFiles: R Package"
+output: html_document
+___
+
+setwd("~/Desktop/CompStatFiles")
+
+#Function 1: make.datalist
+Usability: user provides an input pattern and the file extension. Function will search for all files that fit that description in the working directory and compile them into a list.
+
+```{r}
+#### function to read in data ####
+make.datalist <- function(pattern, file){
+  #makes list of files that meet the pattern
+  filelist=list.files(pattern=pattern)
+  #drops file extension
+  filenames <- gsub('.{4}$','',filelist)
+  #puts files into a list object
+  if(isTRUE(file=="csv")) {
+  d=lapply(filelist, function(x)read.csv(x, header=T)) }
+  else if(isTRUE(file=="txt")){   
+  d=lapply(filelist, function(x)read.delim(x, header=T)) }
+  else {
+    print("Warning: data must be txt or csv format")}
+  #adds names from filenames to elements of list
+  names(d) <- paste(filenames)
+  return(d)
+}
+```
+
+make.datalist works with txt and csv files only. Any other file type will be given a warning.
+
+```{r}
+readtest_txt <- make.datalist("*Enc1.txt", "txt")
+readtest_csv <- make.datalist("*Enc1.csv","csv")
+readtest_xlsx <- make.datalist("*Enc1.xlsx", "xlsx")
+```
+
+
+#Function 2: make.duration
+Usability: user provides the dataset (a list) and the names of two columns. Column1 will be subtracted from Column2. This number will be transformed from scanner time to seconds, then put into a list. When calculating the durations, negative values will be changed to NAs. If this happens, the user will see a warning that negative values were found.
+
+```{r}
+#### function for making duration ####
+#only used when you want to subtract one column from another!
+make.duration <- function(data, col1, col2){
+  duration_list <- vector(mode="list", length=length(data))
+  for(i in 1:length(data)){
+    #make vector of durations
+    duration <- (data[[i]][col2] - data[[i]][col1])/1000
+    #check for negative values, return "NA" in place of negatives
+    omitneg <- function(x){ifelse(x< 0, "NA",x)}
+    dur_omit <- sapply(duration, omitneg)
+    #check for NAs, and return warning if any NAs found
+    if(isTRUE(all.equal(duration,dur_omit))){
+    } else {
+      print(paste(i, "Warning: Negative values calculated and set to NA"))
+    }
+    duration_list[[i]] <- as.numeric(dur_omit)
+    #name each column based on iteration of data list
+    names(duration_list) <- names(data)
+  }
+  return(duration_list)
+}
+```
+
+
+A warning will be printed for each subject that has NAs in their durations.
+```{r}
+durationtest <- vector(mode="list", length = 2)
+durationtest <- make.duration(readtest_csv, "Vividness.OnsetTime", "Vividness.RTTime")
+```
+
+
+#Function 3: make.onset
+Usability: user provides the data (a list), the name of the scanner trigger column, the condition of interest for the onset file, the duration (a list or single number), and the weight (a single number). The function will output a 3 column dataframe of Onset, Duration, and Weight in the format of a list.
+
+```{r}
+#### function for onset files ####
+make.onset <- function(data, trigger, condition, duration, weight) {
+  onset_file <- vector(mode="list", length(data))
+  onset_file_omit <- vector(mode="list", length(data))
+  for(i in 1:length(data)){
+  #make onset column: put from scanner time into real time
+  cond_onset <- (data[[i]][trigger] - data[[i]][condition])/1000
+  #make duration column
+  if(isTRUE(is.numeric(duration))){
+  #if argument is a number, repeat for length of onset file
+  dur <- rep(duration, length(cond_onset))
+  }
+  else if(isTRUE(is.list(duration))){
+  #if argument is a list, copy variable to onset file
+  dur <- duration[[i]]
+  }
+  else{
+  print(paste(i, "Warning: Duration must be specified as a single number or list"))
+  }
+  #make weight column
+  wgt <- rep(weight, length(cond_onset))
+  #put together in a dataframe
+  onset_file[[i]] <- data.frame(cond_onset, dur, wgt)
+  #omit rows with value NA
+  onset_file_omit[[i]] <- na.omit(onset_file[[i]])
+  if(isTRUE(all.equal(onset_file_omit[[i]],onset_file[[i]]))){
+  } else {
+  print(paste(i, "Warning: NAs were removed from onset file"))
+  }
+  }
+  #name each column based on iteration of data list
+  names(onset_file_omit) <- names(data)
+  #name each column in each list element
+  colnames <- c("Onset", "Duration", "Weight")
+  onset_file_done <- lapply(onset_file_omit, setNames, colnames)
+  return(onset_file_done)
+}
+```
+
+make.onset will determine whether a list or single value was entered for duration. If another input is given, the user will see a warning. The function will omit from the final dataframe any rows with a value of NA, and the user will be warned.
+
+With a constant duration:
+```{r}
+onsettest_singledur <- vector(mode="list", length=length(readtest_csv))
+onsettest_singledur <- make.onset(readtest_csv, "Trigger.RTTime", "Fixation.OnsetTime", 2, 1)
+```
+
+With a variable duration:
+```{r}
+onsettest_vardur <- vector(mode="list", length=length(readtest_csv))
+onsettest_vardur <- make.onset(readtest_csv, "Trigger.RTTime", "Fixation.OnsetTime", durationtest, 1)
+```
+
+The user can then save these onset files as txt files using their preferred method.
